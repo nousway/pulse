@@ -30,7 +30,11 @@ document.addEventListener('DOMContentLoaded', function () {
     editCallsProjectName: document.getElementById('edit-calls-project-name'),
     editCallsInput: document.getElementById('edit-calls-input'),
     saveCallsBtn: document.getElementById('save-calls-btn'),
-    cancelEditCallsBtn: document.getElementById('cancel-edit-calls-btn')
+    cancelEditCallsBtn: document.getElementById('cancel-edit-calls-btn'),
+    // Добавлены новые элементы для улучшения UX
+    loginError: document.getElementById('login-error'),
+    shiftControls: document.getElementById('shift-controls'),
+    currentProject: document.getElementById('current-project')
   };
 
   const state = {
@@ -45,7 +49,7 @@ document.addEventListener('DOMContentLoaded', function () {
     channel: localStorage.getItem('channel') || 'Call Back',
     projects: JSON.parse(localStorage.getItem('projects')) || (() => {
       const defaultProjects = [];
-      for (let i = 1; i <= 20; i++) {
+      for (let i = 1; i <= 5; i++) { // Уменьшено количество проектов по умолчанию
         defaultProjects.push({
           name: `Проект ${i}`,
           calls: 0,
@@ -77,18 +81,57 @@ document.addEventListener('DOMContentLoaded', function () {
       localStorage.setItem('callStartTime', state.callStartTime);
       localStorage.setItem('channel', state.channel);
       localStorage.setItem('projects', JSON.stringify(state.projects));
-      
-      state.projects.forEach(p => {
-        localStorage.setItem(`calls_${p.name}`, p.calls);
-        localStorage.setItem(`status_${p.name}`, p.status);
-      });
     } catch (e) {
       console.error('Ошибка сохранения:', e);
       if (e.name === 'QuotaExceededError') {
-        localStorage.clear();
-        alert('Переполнение хранилища. Данные очищены.');
+        // Более дружелюбное сообщение об ошибке
+        showNotification('Переполнение хранилища. Старые данные будут очищены.', 'error');
+        setTimeout(() => {
+          localStorage.clear();
+          location.reload();
+        }, 3000);
       }
     }
+  }
+
+  // Новая функция для показа уведомлений
+  function showNotification(message, type = 'info') {
+    // Создаем элемент уведомления, если его нет
+    let notification = document.getElementById('notification');
+    if (!notification) {
+      notification = document.createElement('div');
+      notification.id = 'notification';
+      notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        border-radius: 5px;
+        color: white;
+        z-index: 10000;
+        opacity: 0;
+        transition: opacity 0.3s;
+        max-width: 300px;
+      `;
+      document.body.appendChild(notification);
+    }
+    
+    // Устанавливаем стили в зависимости от типа
+    if (type === 'error') {
+      notification.style.background = '#ff4757';
+    } else if (type === 'success') {
+      notification.style.background = '#2ed573';
+    } else {
+      notification.style.background = '#3742fa';
+    }
+    
+    notification.textContent = message;
+    notification.style.opacity = '1';
+    
+    // Автоматически скрываем через 3 секунды
+    setTimeout(() => {
+      notification.style.opacity = '0';
+    }, 3000);
   }
 
   function updateStatusIndicator() {
@@ -98,6 +141,14 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (state.shiftPaused) ind.classList.add('paused');
     else if (state.currentCall) ind.classList.add('active-call');
     else ind.classList.add('active');
+    
+    // Обновляем текст текущего проекта, если есть активный звонок
+    if (state.currentCall) {
+      elements.currentProject.textContent = `Текущий проект: ${state.currentCall}`;
+      elements.currentProject.style.display = 'block';
+    } else {
+      elements.currentProject.style.display = 'none';
+    }
   }
 
   function renderProjects() {
@@ -113,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function () {
       
       card.innerHTML = `
         <h3>${project.name}</h3>
-        <div>Звонков: ${project.calls}</div>
+        <div>Звонков: <span class="call-count">${project.calls}</span></div>
         <div>Канал: ${state.channel}</div>
         <div style="display: flex; gap: 10px; margin-top: 15px;">
           <button class="project-btn" data-project="${project.name}" ${disabled ? `disabled title="${reason}"` : ''}>
@@ -159,7 +210,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function handleLogin() {
     const name = elements.operatorInput.value.trim();
-    if (!name) return alert("Введите имя оператора!");
+    if (!name) {
+      elements.loginError.style.display = 'block';
+      elements.loginError.textContent = "Введите имя оператора!";
+      return;
+    }
+    
+    elements.loginError.style.display = 'none';
     state.operator = name;
     elements.operatorName.textContent = name;
     elements.loginModal.classList.remove('active');
@@ -168,11 +225,18 @@ document.addEventListener('DOMContentLoaded', function () {
     renderProjects();
     updateStatusIndicator();
     elements.startShiftBtn.disabled = state.shiftActive;
+    
+    // Фокусируемся на кнопке начала смены для улучшения навигации
+    if (!state.shiftActive) {
+      elements.startShiftBtn.focus();
+    }
   }
 
   function startShift() {
     if (!state.operator) {
-      alert("Сначала введите имя оператора!");
+      showNotification("Сначала введите имя оператора!", "error");
+      elements.loginModal.classList.add('active');
+      elements.operatorInput.focus();
       return;
     }
     
@@ -181,13 +245,19 @@ document.addEventListener('DOMContentLoaded', function () {
     state.totalPausedTime = 0;
     startTimer('shift');
     elements.startShiftBtn.disabled = true;
+    elements.shiftControls.classList.add('shift-active');
     saveState();
     renderProjects();
     updateStatusIndicator();
     elements.shiftTimer.parentElement.classList.add('active');
+    
+    showNotification("Смена начата!", "success");
   }
 
   function endShift() {
+    // Подтверждение завершения смены
+    if (!confirm("Вы уверены, что хотите завершить смену?")) return;
+    
     stopTimer('shift');
     stopTimer('call');
     stopTimer('pause');
@@ -205,13 +275,19 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.shiftTimer.parentElement.classList.remove('active');
     elements.callTimer.parentElement.classList.remove('active');
     elements.startShiftBtn.disabled = false;
+    elements.shiftControls.classList.remove('shift-active');
+    
+    showNotification("Смена завершена!", "success");
   }
 
   function toggleChannel() {
     state.channel = state.channel === 'Call Back' ? 'Hot Line' : 'Call Back';
     elements.channelToggleBtn.textContent = state.channel;
+    elements.channelToggleBtn.classList.toggle('channel-hotline');
     saveState();
     renderProjects();
+    
+    showNotification(`Канал изменен на: ${state.channel}`);
   }
 
   function togglePause() {
@@ -235,6 +311,8 @@ document.addEventListener('DOMContentLoaded', function () {
     saveState();
     renderProjects();
     updateStatusIndicator();
+    
+    showNotification("Смена на паузе", "info");
   }
 
   function endPause() {
@@ -252,6 +330,8 @@ document.addEventListener('DOMContentLoaded', function () {
     saveState();
     renderProjects();
     updateStatusIndicator();
+    
+    showNotification("Пауза завершена", "success");
   }
 
   function showReport() {
@@ -287,6 +367,9 @@ document.addEventListener('DOMContentLoaded', function () {
             <div style="font-size: 24px; font-weight: bold; color: var(--accent); margin-bottom: 10px;">
                 ${currentDate}    ${timeInterval} ( ${state.operator} )
             </div>
+            <div style="font-size: 16px; margin-bottom: 5px;">
+                Длительность смены: ${formatTime(duration)}
+            </div>
         </div>
         
         <div style="margin-top: 20px;">
@@ -305,7 +388,7 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         
         <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(212, 175, 55, 0.2);">
-            <div style="font-weight: 600; color: var(--accent);">Всего звонков: ${totalCalls}</div>
+            <div style="font-weight: 600; color: var(--accent); font-size: 18px;">Всего звонков: ${totalCalls}</div>
         </div>
     `;
     
@@ -319,6 +402,8 @@ document.addEventListener('DOMContentLoaded', function () {
       elements.editCallsProjectName.textContent = projectName;
       elements.editCallsInput.value = project.calls;
       elements.editCallsModal.classList.add('active');
+      // Фокусируемся на поле ввода
+      setTimeout(() => elements.editCallsInput.focus(), 100);
     }
   }
 
@@ -331,8 +416,9 @@ document.addEventListener('DOMContentLoaded', function () {
         renderProjects();
         elements.editCallsModal.classList.remove('active');
         state.editingProject = null;
+        showNotification("Количество звонков обновлено", "success");
       } else {
-        alert('Количество звонков не может быть отрицательным!');
+        showNotification("Количество звонков не может быть отрицательным!", "error");
       }
     }
   }
@@ -341,8 +427,6 @@ document.addEventListener('DOMContentLoaded', function () {
     state.projects.forEach(p => {
       p.calls = 0;
       p.status = 'inactive';
-      localStorage.removeItem(`calls_${p.name}`);
-      localStorage.removeItem(`status_${p.name}`);
     });
     
     Object.assign(state, {
@@ -366,6 +450,7 @@ document.addEventListener('DOMContentLoaded', function () {
     renderProjects();
     updateStatusIndicator();
     elements.startShiftBtn.disabled = false;
+    elements.shiftControls.classList.remove('shift-active');
   }
 
   function closeReport() {
@@ -383,28 +468,31 @@ document.addEventListener('DOMContentLoaded', function () {
     
     state.projects.forEach((project, index) => {
       const projectDiv = document.createElement('div');
+      projectDiv.className = 'project-edit-item';
       projectDiv.style.display = 'flex';
       projectDiv.style.alignItems = 'center';
       projectDiv.style.marginBottom = '10px';
+      projectDiv.style.gap = '10px';
       
       const input = document.createElement('input');
       input.type = 'text';
       input.value = project.name;
       input.className = 'project-input';
       input.dataset.index = index;
+      input.style.flex = '1';
       
       const deleteBtn = document.createElement('button');
       deleteBtn.textContent = '🗑️';
       deleteBtn.className = 'delete-project-btn';
+      deleteBtn.title = 'Удалить проект';
       deleteBtn.onclick = () => {
         if (state.projects.length > 1) {
-          localStorage.removeItem(`calls_${project.name}`);
-          localStorage.removeItem(`status_${project.name}`);
-          
-          state.projects.splice(index, 1);
-          renderProjectsEditList();
+          if (confirm(`Удалить проект "${project.name}"?`)) {
+            state.projects.splice(index, 1);
+            renderProjectsEditList();
+          }
         } else {
-          alert('Должен остаться хотя бы один проект!');
+          showNotification("Должен остаться хотя бы один проект!", "error");
         }
       };
       
@@ -416,25 +504,52 @@ document.addEventListener('DOMContentLoaded', function () {
 
   function saveProjects() {
     const inputs = elements.projectsEditContainer.querySelectorAll('.project-input');
+    const newProjects = [];
+    let hasEmptyName = false;
     
     inputs.forEach((input, index) => {
       const newName = input.value.trim();
-      if (newName && state.projects[index]) {
-        if (state.projects[index].name !== newName) {
-          localStorage.setItem(`calls_${newName}`, state.projects[index].calls);
-          localStorage.setItem(`status_${newName}`, state.projects[index].status);
-          
-          localStorage.removeItem(`calls_${state.projects[index].name}`);
-          localStorage.removeItem(`status_${state.projects[index].name}`);
-          
-          state.projects[index].name = newName;
-        }
+      if (!newName) {
+        hasEmptyName = true;
+        input.style.borderColor = 'red';
+        return;
+      }
+      
+      // Проверяем дубликаты имен
+      if (newProjects.some(p => p.name === newName)) {
+        showNotification(`Проект с именем "${newName}" уже существует!`, "error");
+        input.style.borderColor = 'red';
+        return;
+      }
+      
+      input.style.borderColor = '';
+      
+      // Сохраняем существующие данные или создаем новый проект
+      if (state.projects[index]) {
+        newProjects.push({
+          ...state.projects[index],
+          name: newName
+        });
+      } else {
+        newProjects.push({
+          name: newName,
+          calls: 0,
+          status: 'inactive'
+        });
       }
     });
     
+    if (hasEmptyName) {
+      showNotification("Имя проекта не может быть пустым!", "error");
+      return;
+    }
+    
+    state.projects = newProjects;
     saveState();
     renderProjects();
     elements.editProjectsModal.classList.remove('active');
+    
+    showNotification("Проекты сохранены", "success");
   }
 
   function addNewProject() {
@@ -445,11 +560,20 @@ document.addEventListener('DOMContentLoaded', function () {
     };
     state.projects.push(newProject);
     renderProjectsEditList();
+    
+    // Фокусируемся на новом поле ввода
+    const inputs = elements.projectsEditContainer.querySelectorAll('.project-input');
+    if (inputs.length > 0) {
+      inputs[inputs.length - 1].focus();
+    }
   }
 
   // Обработчики событий
   elements.loginButton.addEventListener('click', handleLogin);
-  elements.operatorInput.addEventListener('keypress', e => e.key === 'Enter' && handleLogin());
+  elements.operatorInput.addEventListener('keypress', e => {
+    if (e.key === 'Enter') handleLogin();
+  });
+  
   elements.startShiftBtn.addEventListener('click', startShift);
   elements.endShiftBtn.addEventListener('click', endShift);
   elements.pauseShiftBtn.addEventListener('click', togglePause);
@@ -498,6 +622,7 @@ document.addEventListener('DOMContentLoaded', function () {
           state.currentCall = null;
           elements.callTimer.textContent = '00:00:00';
           elements.callTimer.parentElement.classList.remove('active');
+          showNotification(`Звонок по проекту "${name}" завершен`, "success");
         } else {
           state.projects.forEach(p => p.status = 'inactive');
           project.status = 'active';
@@ -505,6 +630,7 @@ document.addEventListener('DOMContentLoaded', function () {
           state.callStartTime = Date.now();
           startTimer('call');
           elements.callTimer.parentElement.classList.add('active');
+          showNotification(`Начат звонок по проекту "${name}"`, "info");
         }
         
         saveState();
@@ -520,6 +646,20 @@ document.addEventListener('DOMContentLoaded', function () {
     }
   });
 
+  // Добавляем обработчик для закрытия модальных окон по ESC
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (elements.editProjectsModal.classList.contains('active')) {
+        elements.editProjectsModal.classList.remove('active');
+      } else if (elements.editCallsModal.classList.contains('active')) {
+        elements.editCallsModal.classList.remove('active');
+        state.editingProject = null;
+      } else if (elements.reportModal.classList.contains('active')) {
+        closeReport();
+      }
+    }
+  });
+
   // Автоинициализация
   if (state.operator) {
     elements.operatorName.textContent = state.operator;
@@ -527,13 +667,16 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.app.style.display = 'block';
     elements.startShiftBtn.disabled = state.shiftActive;
     
-    if (state.shiftActive && !state.shiftPaused) {
-      const currentTime = Date.now();
-      const elapsed = currentTime - state.shiftStartTime - state.totalPausedTime;
-      state.shiftStartTime = currentTime - elapsed;
+    if (state.shiftActive) {
+      elements.shiftControls.classList.add('shift-active');
       
-      startTimer('shift');
-      elements.shiftTimer.parentElement.classList.add('active');
+      if (!state.shiftPaused) {
+        const currentTime = Date.now();
+        const elapsed = currentTime - state.shiftStartTime - state.totalPausedTime;
+        state.shiftStartTime = currentTime - elapsed;
+        startTimer('shift');
+        elements.shiftTimer.parentElement.classList.add('active');
+      }
     }
     
     if (state.currentCall) {
@@ -541,7 +684,17 @@ document.addEventListener('DOMContentLoaded', function () {
       elements.callTimer.parentElement.classList.add('active');
     }
     
+    // Восстанавливаем состояние кнопки переключения канала
+    if (state.channel === 'Hot Line') {
+      elements.channelToggleBtn.classList.add('channel-hotline');
+    }
+    
     renderProjects();
     updateStatusIndicator();
+  }
+  
+  // Фокусируемся на поле ввода имени при загрузке
+  if (!state.operator) {
+    setTimeout(() => elements.operatorInput.focus(), 100);
   }
 });
